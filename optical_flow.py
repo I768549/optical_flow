@@ -3,7 +3,6 @@ import time
 import json
 import sys
 import os
-
 import cv2
 import numpy as np
 import yaml
@@ -18,9 +17,10 @@ def load_config(config_path=None):
 
 
 class OpticalFlowSender:
-    def __init__(self, device, domain_id: int, config_path=None):
+    def __init__(self, device, partition, domain_id: int, config_path=None):
         self._device = device
         self._domain_id = domain_id
+        self._partition = partition
 
         cfg = load_config(config_path)
 
@@ -41,7 +41,7 @@ class OpticalFlowSender:
         self._frame_height = cfg["frame_height"]
 
         self._cap = None
-        self._messenger = DDSMessenger(domain_id)
+        self._messenger = DDSMessenger(partition, domain_id=domain_id)
         self._prev_gray = None
         self._prev_points = None
         self._prev_time = None
@@ -188,16 +188,20 @@ class OpticalFlowSender:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Optical flow sender for FPV drone")
+    parser = argparse.ArgumentParser(description="Optical flow sender for FPV drop mission")
     parser.add_argument("--device", default="0",
                         help="Camera device index or path (default: 0)")
+    
+    parser.add_argument("--partition", default="", help="DDs partition (must match handler)")
+    
     parser.add_argument("--domain-id", type=int, default=0,
                         help="DDS domain id (default: 0)")
+    
     parser.add_argument("--config", default=None,
                         help="Path to config.yaml (default: config.yaml next to this script)")
     args = parser.parse_args()
 
-    sender = OpticalFlowSender(args.device, args.domain_id, args.config)
+    sender = OpticalFlowSender(args.device, args.partition, args.domain_id,  args.config)
     sender.start()
 
 
