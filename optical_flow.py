@@ -1,53 +1,44 @@
-"""
-optical flow computation 
-
-Captures frames from the bottom fpv camera computes Lucas-Kanade
-optical flow, and sends results to huha_handler via DDS messenger topic
-
-Usage example:
-
-python optical_flow_sender.py --device 0 --domain-id 0
-
-The huha_handler receives data in OpticalFlowReceiver via "FLOW_DATA" topic.
-"""
-
 import argparse
 import time
 import json
 import sys
+import os
 
 import cv2
 import numpy as np
+import yaml
 from messenger_async import DDSMessenger
 
 
-# Lucas-Kanade params
-LK_PARAMS = dict(
-    winSize=(21, 21),
-    maxLevel=3,
-    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
-)
-
-# Feature detection params
-FEATURE_PARAMS = dict(
-    maxCorners=80,
-    qualityLevel=0.05,
-    minDistance=10,
-    blockSize=7,
-)
-
-# Re-detect features when count drops below this
-MIN_FEATURES = 15
-
-# Frame processing resolution
-FRAME_WIDTH = 320
-FRAME_HEIGHT = 240
+def load_config(config_path=None):
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
 
 
 class OpticalFlowSender:
-    def __init__(self, device, domain_id: int):
+    def __init__(self, device, domain_id: int, config_path=None):
         self._device = device
         self._domain_id = domain_id
+
+        cfg = load_config(config_path)
+
+        self._lk_params = dict(
+            winSize=(cfg["lk_win_size"], cfg["lk_win_size"]),
+            maxLevel=cfg["lk_max_level"],
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                      cfg["lk_max_count"], cfg["lk_epsilon"]),
+        )
+        self._feature_params = dict(
+            maxCorners=cfg["feature_max_corners"],
+            qualityLevel=cfg["feature_quality_level"],
+            minDistance=cfg["feature_min_distance"],
+            blockSize=cfg["feature_block_size"],
+        )
+        self._min_features = cfg["min_features"]
+        self._frame_width = cfg["frame_width"]
+        self._frame_height = cfg["frame_height"]
 
         self._cap = None
         self._messenger = DDSMessenger(domain_id)
@@ -80,9 +71,9 @@ class OpticalFlowSender:
             print(f"Failed to open camera device: {self._device}")
             sys.exit(1)
 
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-        print(f"Camera opened: {self._device} ({FRAME_WIDTH}x{FRAME_HEIGHT})")
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
+        print(f"Camera opened: {self._device} ({self._frame_width}x{self._frame_height})")
 
     def _connect_messenger(self):
         try:
@@ -95,7 +86,7 @@ class OpticalFlowSender:
             print("Running without publisher connection (will skip sends).")
 
     def _detect_features(self, gray):
-        points = cv2.goodFeaturesToTrack(gray, **FEATURE_PARAMS)
+        points = cv2.goodFeaturesToTrack(gray, **self._feature_params)
         return points
 
     def _process_frame(self):
@@ -118,7 +109,7 @@ class OpticalFlowSender:
             return
 
         # No features to track -- re-detect
-        if self._prev_points is None or len(self._prev_points) < MIN_FEATURES:
+        if self._prev_points is None or len(self._prev_points) < self._min_features:
             self._prev_points = self._detect_features(gray)
             if self._prev_points is None:
                 self._prev_gray = gray
@@ -128,7 +119,7 @@ class OpticalFlowSender:
 
         # Lucas-Kanade optical flow
         next_points, status, _ = cv2.calcOpticalFlowPyrLK(
-            self._prev_gray, gray, self._prev_points, None, **LK_PARAMS
+            self._prev_gray, gray, self._prev_points, None, **self._lk_params
         )
 
         if next_points is None or status is None:
@@ -169,7 +160,7 @@ class OpticalFlowSender:
         self._prev_time = now
 
         # Keep tracked points, re-detect if too few
-        if good_count < MIN_FEATURES:
+        if good_count < self._min_features:
             self._prev_points = self._detect_features(gray)
         else:
             self._prev_points = next_good.reshape(-1, 1, 2)
@@ -202,9 +193,11 @@ def main():
                         help="Camera device index or path (default: 0)")
     parser.add_argument("--domain-id", type=int, default=0,
                         help="DDS domain id (default: 0)")
+    parser.add_argument("--config", default=None,
+                        help="Path to config.yaml (default: config.yaml next to this script)")
     args = parser.parse_args()
 
-    sender = OpticalFlowSender(args.device, args.domain_id)
+    sender = OpticalFlowSender(args.device, args.domain_id, args.config)
     sender.start()
 
 
