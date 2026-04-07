@@ -30,7 +30,7 @@ def main():
                         help="Send interval in seconds (default: 0.1)")
     args = parser.parse_args()
 
-    messenger = DDSMessenger(domain_id=args.domain_id)
+    messenger = DDSMessenger(args.partition, domain_id=args.domain_id)
     try:
         messenger.init()
     except Exception as e:

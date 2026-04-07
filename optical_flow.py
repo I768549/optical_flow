@@ -41,7 +41,7 @@ class OpticalFlowSender:
         self._frame_height = cfg["frame_height"]
 
         self._cap = None
-        self._messenger = DDSMessenger(domain_id=domain_id)
+        self._messenger = DDSMessenger(partition, domain_id=domain_id)
         self._prev_gray = None
         self._prev_points = None
         self._prev_time = None
