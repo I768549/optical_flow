@@ -47,6 +47,7 @@ class OpticalFlowSender:
         self._prev_time = None
 
         self._messenger_ready = False
+        self._active = False
 
     def start(self):
         self._connect_camera()
@@ -78,12 +79,28 @@ class OpticalFlowSender:
     def _connect_messenger(self):
         try:
             self._messenger.init()
+            self._messenger.subscribe("FLOW_CONTROL", self._on_flow_control)
             self._messenger_ready = True
             print(f"DDS messenger initialized (domain_id={self._domain_id})")
         except Exception as e:
             self._messenger_ready = False
             print(f"Failed to initialize DDS messenger: {e}")
             print("Running without publisher connection (will skip sends).")
+
+    def _on_flow_control(self, message):
+        try:
+            data = json.loads(message.data()) if hasattr(message, 'data') else json.loads(message)
+            was_active = self._active
+            self._active = bool(data.get("active", False))
+            if self._active != was_active:
+                state = "ACTIVE" if self._active else "IDLE"
+                print(f"Flow control: {state}")
+                if self._active:
+                    self._prev_gray = None
+                    self._prev_points = None
+                    self._prev_time = None
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            print(f"Bad FLOW_CONTROL message: {e}")
 
     def _detect_features(self, gray):
         points = cv2.goodFeaturesToTrack(gray, **self._feature_params)
@@ -92,6 +109,9 @@ class OpticalFlowSender:
     def _process_frame(self):
         ret, frame = self._cap.read()
         if not ret:
+            return
+
+        if not self._active:
             return
 
         now = time.monotonic()
