@@ -29,11 +29,11 @@ class FrameBufferDisplay:
         self._fb_fd = None
         self._tty_fd = None
         self._fbp = None
+        self._fb_array = None  # <-- Указатель numpy на память экрана
         self._screensize = 0
         self._bpp = 0
         self._line_length = 0
         
-        # Реальные параметры экрана
         self._xres = 0
         self._yres = 0
         self._yres_virtual = 0
@@ -55,9 +55,8 @@ class FrameBufferDisplay:
         try:
             fcntl.ioctl(self._fb_fd, FBIOPUT_VSCREENINFO, vinfo_buf)
         except OSError:
-            pass # Драйвер послал нас лесом, работаем с тем, что есть
+            pass
 
-        # Читаем то, что РЕАЛЬНО установилось
         fcntl.ioctl(self._fb_fd, FBIOGET_VSCREENINFO, vinfo_buf)
 
         self._xres, self._yres = struct.unpack_from("II", vinfo_buf, 0)
@@ -68,18 +67,23 @@ class FrameBufferDisplay:
         self._green_offset = struct.unpack_from("I", vinfo_buf, 44)[0]
         self._blue_offset = struct.unpack_from("I", vinfo_buf, 56)[0]
 
-        # Надежное получение line_length (без захардкоженных смещений!)
         finfo_buf = bytearray(88)
         fcntl.ioctl(self._fb_fd, FBIOGET_FSCREENINFO, finfo_buf)
         fix_fmt = "@16s L I I I I H H H I"
         fields = struct.unpack_from(fix_fmt, finfo_buf, 0)
         self._line_length = fields[9]
 
-        # Буфер считаем строго по виртуальной высоте и реальной длине строки
         self._screensize = self._line_length * self._yres_virtual
 
         self._fbp = mmap.mmap(self._fb_fd, self._screensize,
                               mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+
+        # Создаем numpy массив, который смотрит прямо в /dev/fb0
+        self._fb_array = np.ndarray(
+            shape=(self._yres_virtual, self._line_length),
+            dtype=np.uint8,
+            buffer=self._fbp
+        )
 
         try:
             self._tty_fd = os.open(self._tty_path, os.O_RDWR)
@@ -93,48 +97,27 @@ class FrameBufferDisplay:
         if not self._is_initialized:
             return
 
-        # Защита от мусорных типов
         if frame.dtype != np.uint8:
             frame = frame.astype(np.uint8)
 
-        # Ресайзим строго под реальное разрешение экрана, а не под хотелки
+        # Оптимизация 2: Ресайз это ОЧЕНЬ дорого. Делаем его только если реально нужно.
         if frame.shape[1] != self._xres or frame.shape[0] != self._yres:
-            frame = cv2.resize(frame, (self._xres, self._yres))
+            frame = cv2.resize(frame, (self._xres, self._yres), interpolation=cv2.INTER_NEAREST)
 
         converted = self._convert_frame(frame)
         self._blit_frame(converted)
 
     def _blit_frame(self, converted: np.ndarray):
-        # Жесткий лимит: не пытаться отрисовать больше строк, чем влезает в память
         rows = min(converted.shape[0], self._yres_virtual)
-
-        if not converted.flags["C_CONTIGUOUS"]:
-            converted = np.ascontiguousarray(converted)
-
-        src_stride = converted.strides[0]
-        dst_stride = self._line_length
-
         if rows <= 0:
             return
 
-        if src_stride == dst_stride:
-            byte_count = rows * dst_stride
-            self._fbp.seek(0)
-            self._fbp.write(converted.reshape(-1).view(np.uint8)[:byte_count].tobytes())
-            return
-
+        # Превращаем картинку в плоский по X массив байтов (строка за строкой)
         src_bytes = converted.view(np.uint8).reshape(converted.shape[0], -1)
-        row_bytes = src_bytes.shape[1]
-        dst_row_bytes = min(row_bytes, dst_stride)
+        dst_row_bytes = min(src_bytes.shape[1], self._line_length)
 
-        for y in range(rows):
-            dst_pos = y * dst_stride
-            # Двойная проверка, чтобы не вылететь за границы mmap
-            if dst_pos + dst_row_bytes > self._screensize:
-                break
-                
-            self._fbp.seek(dst_pos)
-            self._fbp.write(src_bytes[y, :dst_row_bytes].tobytes())
+        # ВЕКТОРНАЯ ЗАПИСЬ: Копируем весь блок памяти за один вызов C-функции под капотом NumPy.
+        self._fb_array[:rows, :dst_row_bytes] = src_bytes[:rows, :dst_row_bytes]
 
     def _convert_frame(self, frame):
         if self._bpp == 16:
@@ -157,6 +140,9 @@ class FrameBufferDisplay:
                 pass
             os.close(self._tty_fd)
             self._tty_fd = None
+
+        # Убиваем ссылку numpy перед закрытием mmap
+        self._fb_array = None
 
         if self._fbp is not None:
             self._fbp.close()

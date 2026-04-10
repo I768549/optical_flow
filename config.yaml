@@ -16,3 +16,9 @@ min_features: 5
 # Frame processing resolution
 frame_width: 1280
 frame_height: 720
+
+# Camera capture tuning (similar to tracker defaults)
+capture_codec: MJPG
+capture_fps: 30
+capture_buffer_size: 1
+  

@@ -30,6 +30,9 @@ def main():
     config = load_config(args.config)
     frame_width = config["frame_width"]
     frame_height = config["frame_height"]
+    capture_fps = int(config.get("capture_fps", 30))
+    capture_codec = str(config.get("capture_codec", "MJPG")).upper()
+    capture_buffer_size = int(config.get("capture_buffer_size", 1))
     camera = args.device
     
     optical_flow_computatator = OpticalFlow(config)
@@ -40,16 +43,27 @@ def main():
     
     #Openning camera
     if isinstance(camera, int) or camera.isdigit():
-        cap = cv2.VideoCapture(int(camera))
+        cap = cv2.VideoCapture(int(camera), cv2.CAP_V4L2)
     else:
-        cap = cv2.VideoCapture(camera)
+        cap = cv2.VideoCapture(camera, cv2.CAP_V4L2)
     if not cap.isOpened():
         print(f"Failed to open camera device: {camera}")
         sys.exit(1)
+
+    if capture_codec in ("MJPEG", "MJPG"):
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    elif capture_codec == "YUYV":
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUYV"))
+
+    cap.set(cv2.CAP_PROP_FPS, capture_fps)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, capture_buffer_size)
         
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
-    print(f"Camera opened: {camera}: ({frame_width}x{frame_height})")
+    print(
+        f"Camera opened: {camera}: ({frame_width}x{frame_height}), "
+        f"codec={capture_codec}, fps={capture_fps}, buffer={capture_buffer_size}"
+    )
     
     #Connecting messenger
     optical_flow_sender.connect_messenger()
