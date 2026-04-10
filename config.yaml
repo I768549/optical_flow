@@ -14,5 +14,5 @@ feature_block_size: 7
 min_features: 5
 
 # Frame processing resolution
-frame_width: 320
-frame_height: 240
+frame_width: 1280
+frame_height: 720
