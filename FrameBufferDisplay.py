@@ -44,6 +44,8 @@ class FrameBufferDisplay:
         self._xres = 0
         self._yres = 0
         self._yres_virtual = 0
+        self._xoffset = 0
+        self._yoffset = 0
         self._red_offset = 0
         self._green_offset = 0
         self._blue_offset = 0
@@ -69,6 +71,8 @@ class FrameBufferDisplay:
         self._xres = xres
         self._yres = yres
         self._yres_virtual = struct.unpack_from("I", vinfo_buf, 12)[0]
+        self._xoffset = struct.unpack_from("I", vinfo_buf, 16)[0]
+        self._yoffset = struct.unpack_from("I", vinfo_buf, 20)[0]
         self._bpp = struct.unpack_from("I", vinfo_buf, 24)[0]  # bits_per_pixel at offset 24
 
         # Color offsets: red at offset 32, green at 44, blue at 56
@@ -102,37 +106,47 @@ class FrameBufferDisplay:
         if not self._is_initialized:
             return
 
-        if frame.shape[1] != self.width or frame.shape[0] != self.height:
-            frame = cv2.resize(frame, (self.width, self.height))
+        # Always render to actual visible framebuffer resolution.
+        # Driver may ignore requested mode and keep native xres/yres.
+        target_w = self._xres if self._xres > 0 else self.width
+        target_h = self._yres if self._yres > 0 else self.height
+
+        if frame.shape[1] != target_w or frame.shape[0] != target_h:
+            frame = cv2.resize(frame, (target_w, target_h))
 
         converted = self._convert_frame(frame)
         self._blit_frame(converted)
 
     def _blit_frame(self, converted: np.ndarray):
-        rows = min(self.height, self._yres)
+        rows = min(converted.shape[0], max(0, self._yres - self._yoffset))
 
         if not converted.flags["C_CONTIGUOUS"]:
             converted = np.ascontiguousarray(converted)
 
         src_stride = converted.strides[0]
         dst_stride = self._line_length
+        bytes_per_pixel = max(1, self._bpp // 8)
+        dst_x_bytes = self._xoffset * bytes_per_pixel
+        dst_row_capacity = max(0, dst_stride - dst_x_bytes)
+
+        if rows <= 0 or dst_row_capacity <= 0:
+            return
 
         # Fast path: strides are equal for visible rows
-        if src_stride == dst_stride:
+        if src_stride == dst_stride and dst_x_bytes == 0:
             byte_count = rows * dst_stride
-            self._fbp.seek(0)
+            self._fbp.seek(self._yoffset * dst_stride)
             self._fbp.write(converted.reshape(-1).view(np.uint8)[:byte_count].tobytes())
             return
 
         # Generic path: copy line-by-line, respecting framebuffer pitch
         src_bytes = converted.view(np.uint8).reshape(converted.shape[0], -1)
-        row_bytes = min(src_bytes.shape[1], dst_stride)
+        row_bytes = min(src_bytes.shape[1], dst_row_capacity)
 
-        self._fbp.seek(0)
         for y in range(rows):
+            dst_pos = (self._yoffset + y) * dst_stride + dst_x_bytes
+            self._fbp.seek(dst_pos)
             self._fbp.write(src_bytes[y, :row_bytes].tobytes())
-            if dst_stride > row_bytes:
-                self._fbp.write(b"\x00" * (dst_stride - row_bytes))
 
 
     def _convert_frame(self, frame):
