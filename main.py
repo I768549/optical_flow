@@ -3,9 +3,9 @@ import cv2
 import sys
 import os
 import yaml
-from .FrameBufferDisplay import FrameBufferDisplay
-from .OpticalFlow import OpticalFlow
-from .OpticalFlowSender import OpticalFlowSender
+from FrameBufferDisplay import FrameBufferDisplay
+from OpticalFlow import OpticalFlow
+from OpticalFlowSender import OpticalFlowSender
 def load_config(config_path=None):
     if config_path is None:
         config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
