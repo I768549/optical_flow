@@ -41,6 +41,9 @@ class FrameBufferDisplay:
         # bits per pixel
         self._bpp = 0
         self._line_length = 0
+        self._xres = 0
+        self._yres = 0
+        self._yres_virtual = 0
         self._red_offset = 0
         self._green_offset = 0
         self._blue_offset = 0
@@ -63,6 +66,9 @@ class FrameBufferDisplay:
         fcntl.ioctl(self._fb_fd, FBIOGET_VSCREENINFO, vinfo_buf)
 
         xres, yres = struct.unpack_from("II", vinfo_buf, 0)
+        self._xres = xres
+        self._yres = yres
+        self._yres_virtual = struct.unpack_from("I", vinfo_buf, 12)[0]
         self._bpp = struct.unpack_from("I", vinfo_buf, 24)[0]  # bits_per_pixel at offset 24
 
         # Color offsets: red at offset 32, green at 44, blue at 56
@@ -77,8 +83,9 @@ class FrameBufferDisplay:
         fcntl.ioctl(self._fb_fd, FBIOGET_FSCREENINFO, finfo_buf)
         self._line_length = struct.unpack_from("I", finfo_buf, 48)[0]
 
-        bytes_per_pixel = self._bpp // 8
-        self._screensize = xres * yres * bytes_per_pixel
+        # Framebuffer memory is organized by line stride (line_length),
+        # not strictly width * bytes_per_pixel.
+        self._screensize = self._line_length * self._yres_virtual
 
         self._fbp = mmap.mmap(self._fb_fd, self._screensize,
                               mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
@@ -99,12 +106,36 @@ class FrameBufferDisplay:
             frame = cv2.resize(frame, (self.width, self.height))
 
         converted = self._convert_frame(frame)
+        self._blit_frame(converted)
+
+    def _blit_frame(self, converted: np.ndarray):
+        rows = min(self.height, self._yres)
+
+        if not converted.flags["C_CONTIGUOUS"]:
+            converted = np.ascontiguousarray(converted)
+
+        src_stride = converted.strides[0]
+        dst_stride = self._line_length
+
+        # Fast path: strides are equal for visible rows
+        if src_stride == dst_stride:
+            byte_count = rows * dst_stride
+            self._fbp.seek(0)
+            self._fbp.write(converted.reshape(-1).view(np.uint8)[:byte_count].tobytes())
+            return
+
+        # Generic path: copy line-by-line, respecting framebuffer pitch
+        src_bytes = converted.view(np.uint8).reshape(converted.shape[0], -1)
+        row_bytes = min(src_bytes.shape[1], dst_stride)
 
         self._fbp.seek(0)
-        self._fbp.write(converted.tobytes())
+        for y in range(rows):
+            self._fbp.write(src_bytes[y, :row_bytes].tobytes())
+            if dst_stride > row_bytes:
+                self._fbp.write(b"\x00" * (dst_stride - row_bytes))
 
 
-    def convert_frame(self, frame):
+    def _convert_frame(self, frame):
         if self._bpp == 16:
             converted_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGR565)
         elif self._bpp == 24:
