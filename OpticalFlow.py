@@ -80,8 +80,8 @@ class OpticalFlow:
 
         quality = good_count / total_points
 
-        prev_good = self._prev_points[good_mask]
-        next_good = next_points[good_mask]
+        prev_good = self._prev_points[good_mask].reshape(-1, 2)
+        next_good = next_points[good_mask].reshape(-1, 2)
 
         # Flow vectors per point
         flow_vectors = next_good - prev_good

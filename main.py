@@ -17,6 +17,9 @@ def main():
     parser.add_argument("--device", default="0",
                         help="Camera device index or path (default: 0)")
     
+    parser.add_argument("--partition", default="",
+                        help="DDS partition (must match handler)")
+
     parser.add_argument("--domain-id", type=int, default=0,
                         help="DDS domain id (default: 0)")
     
@@ -30,7 +33,7 @@ def main():
     camera = args.device
     
     optical_flow_computatator = OpticalFlow(config)
-    optical_flow_sender = OpticalFlowSender(args.domain_id,
+    optical_flow_sender = OpticalFlowSender(args.partition, args.domain_id,
                                             on_activate=optical_flow_computatator.reset_state)
     frame_buffer_handler = FrameBufferDisplay(frame_width, frame_height)
     

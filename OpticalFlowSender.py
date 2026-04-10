@@ -2,12 +2,13 @@ from messenger_async import DDSMessenger
 import json
 
 class OpticalFlowSender:
-    def __init__(self, domain_id: int = 0, on_activate=None):
+    def __init__(self, partition: str = "", domain_id: int = 0, on_activate=None):
+        self._partition = partition
         self._domain_id = domain_id
         self._messenger_ready = False
         self.active = False
         self._on_activate = on_activate
-        self._messenger = DDSMessenger(domain_id=domain_id)
+        self._messenger = DDSMessenger(partition=partition, domain_id=domain_id)
 
     def connect_messenger(self):
         try:
