@@ -118,7 +118,7 @@ class FrameBufferDisplay:
         self._blit_frame(converted)
 
     def _blit_frame(self, converted: np.ndarray):
-        rows = min(converted.shape[0], max(0, self._yres - self._yoffset))
+        rows = converted.shape[0]
 
         if not converted.flags["C_CONTIGUOUS"]:
             converted = np.ascontiguousarray(converted)
@@ -127,9 +127,9 @@ class FrameBufferDisplay:
         dst_stride = self._line_length
         bytes_per_pixel = max(1, self._bpp // 8)
         dst_x_bytes = self._xoffset * bytes_per_pixel
-        dst_row_capacity = max(0, dst_stride - dst_x_bytes)
+        row_bytes = converted.shape[1] * bytes_per_pixel
 
-        if rows <= 0 or dst_row_capacity <= 0:
+        if rows <= 0 or row_bytes <= 0:
             return
 
         # Fast path: strides are equal for visible rows
@@ -141,7 +141,6 @@ class FrameBufferDisplay:
 
         # Generic path: copy line-by-line, respecting framebuffer pitch
         src_bytes = converted.view(np.uint8).reshape(converted.shape[0], -1)
-        row_bytes = min(src_bytes.shape[1], dst_row_capacity)
 
         for y in range(rows):
             dst_pos = (self._yoffset + y) * dst_stride + dst_x_bytes
