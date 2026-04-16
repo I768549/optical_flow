@@ -2,10 +2,13 @@ import argparse
 import cv2
 import sys
 import os
+import time
 import yaml
 from FrameBufferDisplay import FrameBufferDisplay
 from OpticalFlow import OpticalFlow
 from OpticalFlowSender import OpticalFlowSender
+
+DEBUG_PRINT_INTERVAL_S = 0.25
 def load_config(config_path=None):
     if config_path is None:
         config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -71,18 +74,49 @@ def main():
     #Initializing FrameBufferDisplay
     frame_buffer_handler.initialize()
     
+    last_result = None
+    last_debug_print = 0.0
+    frame_count = 0
+
     try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 continue
 
-            frame_buffer_handler.imshow(frame)
+            frame_count += 1
 
             if optical_flow_sender.active:
                 of_data = optical_flow_computatator.process_frame(frame)
                 if of_data is not None:
                     optical_flow_sender.send_flow(*of_data)
+                    last_result = of_data
+
+                now = time.monotonic()
+                if now - last_debug_print >= DEBUG_PRINT_INTERVAL_S:
+                    if last_result is not None:
+                        dx, dy, dt, q = last_result
+                        print(f"[FLOW_TX] dx={dx:+7.3f}px dy={dy:+7.3f}px "
+                              f"dt={dt*1000:6.2f}ms q={q:.2f} "
+                              f"pts={optical_flow_computatator.tracked_count}")
+                    else:
+                        print(f"[FLOW_TX] no result yet "
+                              f"pts={optical_flow_computatator.tracked_count}")
+                    last_debug_print = now
+
+                optical_flow_computatator.draw_overlay(
+                    frame, last_result,
+                    tracked_count=optical_flow_computatator.tracked_count)
+            else:
+                last_result = None
+                cv2.putText(frame, "FLOW IDLE (waiting for FLOW_CONTROL)",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (0, 0, 0), 4)
+                cv2.putText(frame, "FLOW IDLE (waiting for FLOW_CONTROL)",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (200, 200, 200), 2)
+
+            frame_buffer_handler.imshow(frame)
     except KeyboardInterrupt:
         print("\nStopping...")
     finally:

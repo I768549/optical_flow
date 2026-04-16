@@ -102,6 +102,44 @@ class OpticalFlow:
 
         return dx, dy, dt, quality
 
+    def draw_overlay(self, frame, last_result=None, tracked_count=None):
+        """Debug overlay: tracked points + median flow vector + stats text."""
+        if frame is None:
+            return frame
+
+        if self._prev_points is not None:
+            for p in self._prev_points.reshape(-1, 2):
+                cv2.circle(frame, (int(p[0]), int(p[1])), 3, (0, 255, 0), -1)
+
+        h, w = frame.shape[:2]
+        cx, cy = w // 2, h // 2
+        cv2.circle(frame, (cx, cy), 4, (255, 255, 255), 1)
+
+        if last_result is not None:
+            dx, dy, dt, quality = last_result
+            arrow_scale = 20
+            end_pt = (int(cx + dx * arrow_scale), int(cy + dy * arrow_scale))
+            cv2.arrowedLine(frame, (cx, cy), end_pt, (0, 0, 255), 2, tipLength=0.3)
+            text = (f"dx={dx:+.2f} dy={dy:+.2f} "
+                    f"dt={dt*1000:.1f}ms q={quality:.2f}")
+        else:
+            text = "dx=---- dy=---- dt=---- q=----"
+
+        if tracked_count is not None:
+            text += f" pts={tracked_count}"
+
+        cv2.putText(frame, text, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
+        cv2.putText(frame, text, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        return frame
+
+    @property
+    def tracked_count(self):
+        if self._prev_points is None:
+            return 0
+        return len(self._prev_points)
+
     def reset_state(self):
         self._prev_gray = None
         self._prev_points = None
