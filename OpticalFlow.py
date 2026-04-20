@@ -23,6 +23,7 @@ class OpticalFlow:
         self._prev_time = None
 
     def _detect_features(self, gray):
+        # (N, 1, 2)
         points = cv2.goodFeaturesToTrack(gray, **self._feature_params)
         return points
 
@@ -31,7 +32,7 @@ class OpticalFlow:
         if frame is None:
             return None
 
-        now = time.monotonic()
+        now = time.monotonic() # time потрібен для нормування в швидкість
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # First frame -- just detect features
@@ -44,9 +45,8 @@ class OpticalFlow:
         dt = now - self._prev_time
         if dt < 1e-4:
             return None
-
+        #Кадр був, але нічого не знайдено, тому повертаємо пустий результат з довірою до точок 0
         zero_result = (0.0, 0.0, dt, 0.0)
-
         # No features to track -- re-detect
         if self._prev_points is None or len(self._prev_points) < self._min_features:
             self._prev_points = self._detect_features(gray)
@@ -86,9 +86,18 @@ class OpticalFlow:
         # Flow vectors per point
         flow_vectors = next_good - prev_good
 
-        # using median to be more stable for outliers
-        dx = float(np.median(flow_vectors[:, 0]))
-        dy = float(np.median(flow_vectors[:, 1]))
+        # MAD-based outlier rejection (euclidean: круг вокруг медианы)
+        med = np.median(flow_vectors, axis=0)
+        dist = np.linalg.norm(flow_vectors - med, axis=1)
+        scale = 1.4826 * np.median(dist) + 1e-6
+        inlier_mask = dist < 3.0 * scale
+
+        if np.sum(inlier_mask) >= self._min_features:
+            dx, dy = np.mean(flow_vectors[inlier_mask], axis=0)
+        else:
+            dx, dy = med
+        dx = float(dx)
+        dy = float(dy)
 
         # Prepare next iteration
         self._prev_gray = gray
