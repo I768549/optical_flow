@@ -5,13 +5,16 @@ lk_max_count: 30
 lk_epsilon: 0.01
 
 # Feature detection (goodFeaturesToTrack)
-feature_max_corners: 10
+feature_max_corners: 100
 feature_quality_level: 0.05
 feature_min_distance: 10
 feature_block_size: 7
 
 # Re-detect features when count drops below this
-min_features: 5
+min_features: 30
+
+# Forward-backward LK sanity check: max round-trip error in pixels
+fb_threshold: 1.5
 
 # Frame processing resolution
 frame_width: 1280

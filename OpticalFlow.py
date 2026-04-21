@@ -1,4 +1,3 @@
-import time
 import cv2
 import numpy as np
 
@@ -17,6 +16,7 @@ class OpticalFlow:
             blockSize=cfg["feature_block_size"],
         )
         self._min_features = cfg["min_features"]
+        self._fb_threshold = cfg["fb_threshold"]
 
         self._prev_gray = None
         self._prev_points = None
@@ -27,12 +27,12 @@ class OpticalFlow:
         points = cv2.goodFeaturesToTrack(gray, **self._feature_params)
         return points
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, frame_ts):
 
         if frame is None:
             return None
 
-        now = time.monotonic() # time потрібен для нормування в швидкість
+        now = frame_ts # time потрібен для нормування в швидкість
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # First frame -- just detect features
@@ -56,20 +56,40 @@ class OpticalFlow:
                 return zero_result
             return None
 
-        # Lucas-Kanade optical flow
-        next_points, status, _ = cv2.calcOpticalFlowPyrLK(
+        # Lucas-Kanade forward: prev -> curr
+        next_points, status_fwd, _ = cv2.calcOpticalFlowPyrLK(
             self._prev_gray, gray, self._prev_points, None, **self._lk_params
         )
 
-        if next_points is None or status is None:
+        if next_points is None or status_fwd is None:
             self._prev_gray = gray
             self._prev_points = self._detect_features(gray)
             self._prev_time = now
             return zero_result
 
-        # Filter good points
-        good_mask = status.flatten() == 1
-        total_points = len(status)
+        # Lucas-Kanade backward: curr -> prev (FB sanity check)
+        back_points, status_bwd, _ = cv2.calcOpticalFlowPyrLK(
+            gray, self._prev_gray, next_points, None, **self._lk_params
+        )
+
+        if back_points is None or status_bwd is None:
+            self._prev_gray = gray
+            self._prev_points = self._detect_features(gray)
+            self._prev_time = now
+            return zero_result
+
+        # Round-trip error: how far a point lands from where it started
+        fb_error = np.linalg.norm(
+            (self._prev_points - back_points).reshape(-1, 2), axis=1
+        )
+
+        # Good = forward ok, backward ok, round-trip tight
+        good_mask = (
+            (status_fwd.flatten() == 1)
+            & (status_bwd.flatten() == 1)
+            & (fb_error < self._fb_threshold)
+        )
+        total_points = len(status_fwd)
         good_count = int(np.sum(good_mask))
 
         if good_count == 0:
@@ -77,8 +97,6 @@ class OpticalFlow:
             self._prev_points = self._detect_features(gray)
             self._prev_time = now
             return zero_result
-
-        quality = good_count / total_points
 
         prev_good = self._prev_points[good_mask].reshape(-1, 2)
         next_good = next_points[good_mask].reshape(-1, 2)
@@ -91,13 +109,17 @@ class OpticalFlow:
         dist = np.linalg.norm(flow_vectors - med, axis=1)
         scale = 1.4826 * np.median(dist) + 1e-6
         inlier_mask = dist < 3.0 * scale
+        inlier_count = int(np.sum(inlier_mask))
 
-        if np.sum(inlier_mask) >= self._min_features:
+        if inlier_count >= self._min_features:
             dx, dy = np.mean(flow_vectors[inlier_mask], axis=0)
         else:
             dx, dy = med
         dx = float(dx)
         dy = float(dy)
+
+        # Fraction of originally tracked points that survived FB + MAD
+        quality = inlier_count / total_points
 
         # Prepare next iteration
         self._prev_gray = gray

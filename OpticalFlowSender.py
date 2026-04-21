@@ -34,12 +34,13 @@ class OpticalFlowSender:
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"Bad FLOW_CONTROL message: {e}")
     
-    def send_flow(self, dx, dy, dt, quality):
+    def send_flow(self, dx, dy, dt, quality, frame_ts):
         payload = json.dumps({
             "dx": round(dx, 4),
             "dy": round(dy, 4),
             "dt": round(dt, 6),
             "quality": round(quality, 3),
+            "frame_ts": round(frame_ts, 6),
         })
         if self._messenger_ready:
             try:

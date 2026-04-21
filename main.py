@@ -1,5 +1,6 @@
 import argparse
 import cv2
+import numpy as np
 import sys
 import os
 import time
@@ -67,7 +68,8 @@ def main():
         f"Camera opened: {camera}: ({frame_width}x{frame_height}), "
         f"codec={capture_codec}, fps={capture_fps}, buffer={capture_buffer_size}"
     )
-    
+    cap.read()
+
     #Connecting messenger
     optical_flow_sender.connect_messenger()
 
@@ -77,20 +79,23 @@ def main():
     last_result = None
     last_debug_print = 0.0
     frame_count = 0
+    dt_samples = []
 
     try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 continue
+            frame_ts = time.monotonic()
 
             frame_count += 1
 
             if optical_flow_sender.active:
-                of_data = optical_flow_computatator.process_frame(frame)
+                of_data = optical_flow_computatator.process_frame(frame, frame_ts)
                 if of_data is not None:
-                    optical_flow_sender.send_flow(*of_data)
+                    optical_flow_sender.send_flow(*of_data, frame_ts=frame_ts)
                     last_result = of_data
+                    dt_samples.append(of_data[2])
 
                 now = time.monotonic()
                 if now - last_debug_print >= DEBUG_PRINT_INTERVAL_S:
@@ -102,6 +107,16 @@ def main():
                     else:
                         print(f"[FLOW_TX] no result yet "
                               f"pts={optical_flow_computatator.tracked_count}")
+                    if dt_samples:
+                        arr = np.asarray(dt_samples)
+                        mean_ms = arr.mean() * 1000
+                        std_ms = arr.std() * 1000
+                        jitter_pct = (arr.std() / arr.mean()) * 100 if arr.mean() > 0 else 0.0
+                        print(f"[DT_STATS] n={len(arr)} "
+                              f"mean={mean_ms:.2f}ms std={std_ms:.2f}ms "
+                              f"min={arr.min()*1000:.2f}ms max={arr.max()*1000:.2f}ms "
+                              f"jitter={jitter_pct:.1f}%")
+                        dt_samples.clear()
                     last_debug_print = now
 
                 optical_flow_computatator.draw_overlay(
