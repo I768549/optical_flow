@@ -111,8 +111,10 @@ class OpticalFlow:
         inlier_mask = dist < 3.0 * scale
         inlier_count = int(np.sum(inlier_mask))
 
+        # Median instead of mean: robust to spatial bias from radial zoom
+        # during vertical motion (features cluster → mean drifts, median holds).
         if inlier_count >= self._min_features:
-            dx, dy = np.mean(flow_vectors[inlier_mask], axis=0)
+            dx, dy = np.median(flow_vectors[inlier_mask], axis=0)
         else:
             dx, dy = med
         dx = float(dx)
