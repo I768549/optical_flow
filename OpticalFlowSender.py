@@ -15,6 +15,18 @@ class OpticalFlowSender:
             self._messenger.init()
             self._messenger.subscribe("FLOW_CONTROL", self._on_flow_control)
             self._messenger_ready = True
+            # Pre-create FLOW_DATA publisher: шлемо один init-пакет, щоб DDS
+            # discovery з handler'ом відбулось заздалегідь. Інакше writer
+            # створюється лише на першому send_flow() після ACTIVE — і handler
+            # ще ~сотні мс чекає matching уже в активній фазі.
+            # Handler відкине це повідомлення по flow_received_at < mission_start_ts.
+            try:
+                self._messenger.send("FLOW_DATA", json.dumps({
+                    "dx": 0.0, "dy": 0.0, "dt": 0.0, "quality": 0.0,
+                    "frame_ts": 0.0,
+                }))
+            except Exception as e:
+                print(f"FLOW_DATA prewarm failed (non-fatal): {e}")
             print(f"DDS messenger initialized (domain_id={self._domain_id})")
         except Exception as e:
             self._messenger_ready = False
